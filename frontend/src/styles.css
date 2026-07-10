@@ -989,15 +989,10 @@ button {
   border-radius: 8px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /*justify-content: space-between;*/
 }
 
-.session-left {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
+
 
 .session-label {
   color: #111827;

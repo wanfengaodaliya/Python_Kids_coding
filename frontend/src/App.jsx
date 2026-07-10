@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS = {
   aiHintFirst: true
 }
 
+const CHAT_WELCOME = '你好呀，我是小海獭，请问有什么可以帮助你的呢？'
 const toast = (message) => window.alert(message)
 
 function loadSettings() {
@@ -36,6 +37,12 @@ function loadSettings() {
 function App() {
   const [page, setPage] = useState(getStored('access_token') ? 'levels' : 'auth')
   const [levelId, setLevelId] = useState(1)
+  const [chatState, setChatState] = useState({
+    currentSessionId: '',
+    messages: [{ content: CHAT_WELCOME, isUser: false }],
+    question: '',
+    sessions: []
+  })
 
   const navigate = (nextPage, nextLevelId) => {
     if (nextLevelId) setLevelId(nextLevelId)
@@ -47,7 +54,7 @@ function App() {
       {page === 'auth' && <AuthPage navigate={navigate} />}
       {page === 'levels' && <LevelsPage navigate={navigate} />}
       {page === 'level' && <LevelPage id={levelId} navigate={navigate} />}
-      {page === 'chat' && <ChatPage />}
+      {page === 'chat' && <ChatPage chatState={chatState} setChatState={setChatState} />}
       {page === 'records' && <RecordsPage />}
       {page === 'settings' && <SettingsPage navigate={navigate} />}
       {page !== 'auth' && page !== 'level' && <TabBar page={page} navigate={navigate} />}
@@ -87,7 +94,6 @@ function AuthPage({ navigate }) {
     window.clearTimeout(showMessage.timer)
     showMessage.timer = window.setTimeout(() => setMessage(''), 3000)
   }
-
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
   const validate = (keys) => {
     const labels = { username: '用户名', password: '密码', phone: '手机号', new_password: '新密码' }
@@ -111,10 +117,7 @@ function AuthPage({ navigate }) {
     setLoading(true)
     try {
       const result = await api.post(config.url, config.body)
-      if (result.code && result.code !== 200 && result.code !== 201) {
-        showMessage(result.msg || '操作失败', 'error')
-        return
-      }
+      if (result.code && result.code !== 200 && result.code !== 201) return showMessage(result.msg || '操作失败', 'error')
       if (activeTab === 'login') {
         setStored('access_token', result.data?.access_token || '')
         setStored('refresh_token', result.data?.refresh_token || '')
@@ -158,13 +161,7 @@ function AuthPage({ navigate }) {
               <input className="input" value={form.username} onChange={(e) => update('username', e.target.value)} placeholder={activeTab === 'login' ? '请输入用户名' : '3-50 个字符'} />
             </>
           )}
-          {activeTab !== 'register' && activeTab !== 'login' && (
-            <>
-              <label className="label">手机号</label>
-              <input className="input" value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="请输入手机号" />
-            </>
-          )}
-          {activeTab === 'register' && (
+          {activeTab !== 'login' && (
             <>
               <label className="label">手机号</label>
               <input className="input" value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="请输入手机号" />
@@ -185,10 +182,12 @@ function LevelsPage({ navigate }) {
   const pathLines = useMemo(() => getPathLines(summary.completed), [summary.completed])
 
   useEffect(() => {
-    api.get('/levels').then((result) => {
-      const completed = Number(result.data?.summary?.completed || getHighestCompleted())
-      setSummary(result.data?.summary || getProgressSummary(completed))
-    }).catch(() => setSummary(getProgressSummary(getHighestCompleted())))
+    api.get('/levels')
+      .then((result) => {
+        const completed = Number(result.data?.summary?.completed || getHighestCompleted())
+        setSummary(result.data?.summary || getProgressSummary(completed))
+      })
+      .catch(() => setSummary(getProgressSummary(getHighestCompleted())))
   }, [])
 
   const openLevel = (level) => {
@@ -224,12 +223,7 @@ function LevelsPage({ navigate }) {
         <div className="path">
           {pathLines.map((line) => <div key={line.id} className={`path-line line-${line.id} ${line.status}`} />)}
           {levels.map((level) => (
-            <button
-              key={level.id}
-              className={`level-node ${level.status} theme-${level.displayTheme}`}
-              style={{ left: `${(level.left / 320) * 100}%`, top: `${(level.top / 520) * 100}%` }}
-              onClick={() => openLevel(level)}
-            >
+            <button key={level.id} className={`level-node ${level.status} theme-${level.displayTheme}`} style={{ left: `${(level.left / 320) * 100}%`, top: `${(level.top / 520) * 100}%` }} onClick={() => openLevel(level)}>
               {level.status === 'current' && <span className="current-marker">继续挑战</span>}
               <span className="node-orb">{level.status === 'completed' && <span className="check-mark">✓</span>}<span className="level-icon">{level.icon}</span></span>
               <span className="node-card"><span className="level-name">{level.name}</span><span className="level-desc">{level.description}</span><span className="level-badge">{level.badge}</span></span>
@@ -237,7 +231,7 @@ function LevelsPage({ navigate }) {
           ))}
         </div>
       </section>
-      <section className="tip-panel"><span className="tip-icon">?</span><span className="tip-text">点亮当前关卡后，下一站会自动亮起来。</span></section>
+      <section className="tip-panel"><span className="tip-icon">?</span><span className="tip-text">点亮当前关卡后，下一站会自动出现。</span></section>
       <div className="wave" />
     </main>
   )
@@ -265,7 +259,7 @@ function LevelPage({ id, navigate }) {
   const runCode = async () => {
     if (!code.trim()) return setOutput('请输入代码'), setOutputType('error')
     setRunning(true)
-    setOutput('代码正在执行，请稍候...')
+    setOutput('代码正在执行，请稍等...')
     setOutputType('info')
     try {
       const result = await api.post('/code/run', { code, timeout: 10, level_id: id, is_submission: false })
@@ -282,14 +276,14 @@ function LevelPage({ id, navigate }) {
   }
 
   const submitCode = async () => {
-    if (!lastRunResult?.success) return setOutput('请先点击“运行”按钮验证代码'), setOutputType('info')
+    if (!lastRunResult?.success) return setOutput('请先点击“运行”验证代码'), setOutputType('info')
     setSubmitting(true)
     try {
       const result = await api.post('/code/run', { code, timeout: 10, level_id: id, is_submission: true })
       const data = result.data || {}
       if (data.passed || String(data.output || '').trim() === level.expectedOutput.trim()) {
         markLevelCompleted(id)
-        setModal({ type: 'success', title: '通过', message: id >= 4 ? '漂亮！四个基础关卡都完成啦。' : '漂亮！这一关通关啦，下一关已经为你点亮。' })
+        setModal({ type: 'success', title: '通过', message: id >= 4 ? '漂亮！四个基础关卡都完成啦。' : '漂亮！这一关通关了，下一关已经点亮。' })
       } else {
         setModal({ type: 'error', title: '未通过', message: `预期输出: "${level.expectedOutput}"\n实际输出: "${String(data.output || '').trim()}"` })
       }
@@ -320,50 +314,114 @@ function LevelPage({ id, navigate }) {
   )
 }
 
-function ChatPage() {
-  const welcome = '你好呀，我是小海獭，请问有什么可以帮助你的呢？'
+function ChatPage({ chatState, setChatState }) {
   const [activeTab, setActiveTab] = useState('chat')
-  const [messages, setMessages] = useState([{ content: welcome, isUser: false }])
-  const [question, setQuestion] = useState('')
   const [typing, setTyping] = useState(false)
-  const [sessions, setSessions] = useState([])
-  const [currentSessionId, setCurrentSessionId] = useState('')
+  const { currentSessionId, messages, question, sessions } = chatState
   const bottomRef = useRef(null)
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, typing])
+
+  const patchChatState = (patch) => setChatState((current) => ({ ...current, ...patch }))
+  const updateMessages = (updater) => {
+    setChatState((current) => ({
+      ...current,
+      messages: typeof updater === 'function' ? updater(current.messages) : updater
+    }))
+  }
 
   const loadSessions = async () => {
     try {
       const result = await api.get('/ai/sessions')
-      setSessions((result.data?.sessions || []).map((item) => ({ ...item, preview: item.preview || `会话 ${item.session_id.slice(0, 8)}...` })))
+      patchChatState({
+        sessions: (result.data?.sessions || []).map((item) => ({
+          ...item,
+          preview: item.first_question || item.preview || `会话 ${String(item.session_id || '').slice(0, 8)}...`
+        }))
+      })
     } catch {
-      setSessions([])
+      patchChatState({ sessions: [] })
+    }
+  }
+
+  const loadSessionHistory = async (sessionId) => {
+    try {
+      const result = await api.get('/ai/history', { session_id: sessionId })
+      const historyMessages = (result.data || []).flatMap((record) => [
+        { content: record.question, isUser: true },
+        { content: record.answer, isUser: false }
+      ]).filter((message) => message.content)
+      patchChatState({
+        currentSessionId: sessionId,
+        messages: historyMessages.length ? historyMessages : [{ content: CHAT_WELCOME, isUser: false }]
+      })
+      setActiveTab('chat')
+    } catch (error) {
+      toast(error.message || '历史对话加载失败')
     }
   }
 
   const sendMessage = async () => {
     const text = question.trim()
     if (!text || typing) return
-    setMessages((current) => [...current, { content: text, isUser: true }, { content: '', isUser: false }])
-    setQuestion('')
+    updateMessages((current) => [...current, { content: text, isUser: true }, { content: '', isUser: false }])
+    patchChatState({ question: '' })
     setTyping(true)
     try {
       await api.streamPost('/ai/chat', { question: text, stream: true, session_id: currentSessionId || null }, (event) => {
-        if (event.session_id) setCurrentSessionId(event.session_id)
+        if (event.session_id) patchChatState({ currentSessionId: event.session_id })
         if (!event.content || event.content === '[END]') return
-        setMessages((current) => current.map((item, index) => index === current.length - 1 ? { ...item, content: `${item.content}${event.content}` } : item))
+        updateMessages((current) => current.map((item, index) => index === current.length - 1 ? { ...item, content: `${item.content}${event.content}` } : item))
       })
       loadSessions()
     } catch (error) {
-      setMessages((current) => current.map((item, index) => index === current.length - 1 ? { ...item, content: item.content || error.message || '抱歉，AI 服务暂时不可用，请稍后再试。' } : item))
+      updateMessages((current) => current.map((item, index) => index === current.length - 1 ? { ...item, content: item.content || error.message || '抱歉，AI 服务暂时不可用，请稍后再试。' } : item))
     } finally {
       setTyping(false)
     }
   }
 
+  const startNewSession = () => {
+    patchChatState({ currentSessionId: '', messages: [{ content: CHAT_WELCOME, isUser: false }], question: '' })
+    setActiveTab('chat')
+  }
+
   return (
     <main className="page chat-page">
-      <div className="tabs"><button className={activeTab === 'chat' ? 'tab active' : 'tab'} onClick={() => setActiveTab('chat')}>对话</button><button className={activeTab === 'history' ? 'tab active' : 'tab'} onClick={() => { setActiveTab('history'); loadSessions() }}>历史记录</button></div>
-      {activeTab === 'chat' ? <section className="chat-panel"><div className="chat-body">{messages.map((message, index) => <div key={index} className={`message-row ${message.isUser ? 'user-row' : 'ai-row'}`}>{!message.isUser && <img className="avatar" src={assets.chatOtter} alt="" />}<div className={`bubble ${message.isUser ? 'user' : 'ai'}`}>{message.content}</div>{message.isUser && <img className="avatar" src={assets.user} alt="" />}</div>)}{typing && <div className="message-row ai-row"><img className="avatar" src={assets.chatOtter} alt="" /><div className="typing"><i className="typing-dot" /><i className="typing-dot delay-1" /><i className="typing-dot delay-2" /></div></div>}<div ref={bottomRef} /></div><div className="input-bar"><input className="question-input" value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} placeholder="请输入消息..." /><button className={`send-btn ${typing || !question.trim() ? 'disabled' : ''}`} onClick={sendMessage}>发送</button></div></section> : <section className="history-panel"><div className="history-toolbar"><h2 className="history-title">历史对话</h2><button className="new-session-btn" onClick={() => { setCurrentSessionId(''); setMessages([{ content: welcome, isUser: false }]); setActiveTab('chat') }}>＋新会话</button></div><div className="history-list">{sessions.length ? sessions.map((session) => <button key={session.session_id} className="session-card" onClick={() => { setCurrentSessionId(session.session_id); setActiveTab('chat') }}><span className="session-left"><span className="session-label">{session.preview}</span><span className="session-meta">{session.message_count || 0} 条消息</span></span><span className="session-arrow">›</span></button>) : <div className="empty">暂无历史对话</div>}</div></section>}
+      <div className="tabs">
+        <button className={activeTab === 'chat' ? 'tab active' : 'tab'} onClick={() => setActiveTab('chat')}>对话</button>
+        <button className={activeTab === 'history' ? 'tab active' : 'tab'} onClick={() => { setActiveTab('history'); loadSessions() }}>历史记录</button>
+      </div>
+      {activeTab === 'chat' ? (
+        <section className="chat-panel">
+          <div className="chat-body">
+            {messages.map((message, index) => (
+              <div key={index} className={`message-row ${message.isUser ? 'user-row' : 'ai-row'}`}>
+                {!message.isUser && <img className="avatar" src={assets.chatOtter} alt="" />}
+                <div className={`bubble ${message.isUser ? 'user' : 'ai'}`}>{message.content}</div>
+                {message.isUser && <img className="avatar" src={assets.user} alt="" />}
+              </div>
+            ))}
+            {typing && <div className="message-row ai-row"><img className="avatar" src={assets.chatOtter} alt="" /><div className="typing"><i className="typing-dot" /><i className="typing-dot delay-1" /><i className="typing-dot delay-2" /></div></div>}
+            <div ref={bottomRef} />
+          </div>
+          <div className="input-bar">
+            <input className="question-input" value={question} onChange={(e) => patchChatState({ question: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} placeholder="请输入消息..." />
+            <button className={`send-btn ${typing || !question.trim() ? 'disabled' : ''}`} onClick={sendMessage}>发送</button>
+          </div>
+        </section>
+      ) : (
+        <section className="history-panel">
+          <div className="history-toolbar"><h2 className="history-title">历史对话</h2><button className="new-session-btn" onClick={startNewSession}>＋新会话</button></div>
+          <div className="history-list">
+            {sessions.length ? sessions.map((session) => (
+              <button key={session.session_id} className="session-card" onClick={() => loadSessionHistory(session.session_id)}>
+                <span className="session-label">{session.preview}</span><span className="session-meta">{session.message_count || 0} 条消息</span>
+                <span className="session-arrow">›</span>
+              </button>
+            )) : <div className="empty">暂无历史对话</div>}
+          </div>
+        </section>
+      )}
     </main>
   )
 }
@@ -373,31 +431,77 @@ function RecordsPage() {
   const [year, setYear] = useState(today.getFullYear())
   const [monthIndex, setMonthIndex] = useState(today.getMonth())
   const [selectedDate, setSelectedDate] = useState(formatDate(today))
-  const [records, setRecords] = useState(getStored('learning_records', {}))
+  const [records, setRecords] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const selectedRecord = records[selectedDate] || null
   const [form, setForm] = useState({ content: '', duration: '', mood: '一般' })
   const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`
   const monthRecords = Object.fromEntries(Object.entries(records).filter(([date]) => date.startsWith(monthKey)))
   const cells = buildMonthCalendar(year, monthIndex, monthRecords)
 
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    api.get('/study-records', { month: monthKey })
+      .then((result) => {
+        if (!active) return
+        const nextRecords = (result.data?.records || []).reduce((resultMap, record) => {
+          resultMap[record.date] = record
+          return resultMap
+        }, {})
+        setRecords(nextRecords)
+      })
+      .catch((error) => {
+        if (active) toast(error.message || '学习记录加载失败')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => { active = false }
+  }, [monthKey])
+
   useEffect(() => setForm({ content: selectedRecord?.content || '', duration: selectedRecord?.duration ? String(selectedRecord.duration) : '', mood: selectedRecord?.mood || '一般' }), [selectedDate, selectedRecord])
   const moveMonth = (offset) => { const date = new Date(year, monthIndex + offset, 1); setYear(date.getFullYear()); setMonthIndex(date.getMonth()); setSelectedDate(formatDate(date)) }
-  const saveRecord = () => {
+  const saveRecord = async () => {
     if (!form.content.trim()) return toast('请先写下学习内容')
-    const next = { ...records, [selectedDate]: { date: selectedDate, content: form.content.trim(), duration: Number(form.duration || 0), mood: form.mood, updatedAt: new Date().toISOString() } }
-    setRecords(next); setStored('learning_records', next); toast('已保存打卡')
+    const record = { date: selectedDate, content: form.content.trim(), duration: Math.max(0, Number(form.duration || 0)), mood: form.mood, updatedAt: new Date().toISOString() }
+    setSaving(true)
+    try {
+      await api.post('/study-records', { study_date: selectedDate, content: record.content, duration: record.duration, mood: record.mood })
+      setRecords((current) => ({ ...current, [selectedDate]: record }))
+      toast('已保存打卡')
+    } catch (error) {
+      toast(error.message || '学习记录保存失败')
+    } finally {
+      setSaving(false)
+    }
   }
-  const deleteRecord = () => {
+  const deleteRecord = async () => {
     if (!selectedRecord || !window.confirm('确定删除这一天的学习记录吗？')) return
-    const next = { ...records }; delete next[selectedDate]; setRecords(next); setStored('learning_records', next)
+    setDeleting(true)
+    try {
+      await api.del(`/study-records/${selectedDate}`)
+      setRecords((current) => {
+        const next = { ...current }
+        delete next[selectedDate]
+        return next
+      })
+      toast('已删除打卡')
+    } catch (error) {
+      toast(error.message || '学习记录删除失败')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
     <main className="page records-page">
-      <header className="calendar-header"><div className="month-block"><h1 className="month-title">{year}年{monthIndex + 1}月</h1><span className="month-meta">本月已打卡 {Object.keys(monthRecords).length} 天</span><div className="month-controls"><button className="icon-button" onClick={() => moveMonth(-1)}>‹</button><button className="icon-button" onClick={() => moveMonth(1)}>›</button></div></div></header>
-      <div className="toolbar"><button className="today-button" onClick={() => { const now = new Date(); setYear(now.getFullYear()); setMonthIndex(now.getMonth()); setSelectedDate(formatDate(now)) }}>今天</button></div>
+      <header className="calendar-header"><div className="month-block"><h1 className="month-title">{year}年{monthIndex + 1}月</h1><span className="month-meta">{loading ? '记录加载中...' : `本月已打卡 ${Object.keys(monthRecords).length} 天`}</span><div className="month-controls"><button className="icon-button" disabled={loading} onClick={() => moveMonth(-1)}>‹</button><button className="icon-button" disabled={loading} onClick={() => moveMonth(1)}>›</button></div></div></header>
+      <div className="toolbar"><button className="today-button" disabled={loading} onClick={() => { const now = new Date(); setYear(now.getFullYear()); setMonthIndex(now.getMonth()); setSelectedDate(formatDate(now)) }}>今天</button></div>
       <section className="calendar card"><div className="weekday-row">{['日', '一', '二', '三', '四', '五', '六'].map((day) => <span key={day} className="weekday">{day}</span>)}</div><div className="calendar-grid">{cells.map((cell) => <button key={cell.date} className={`day-cell ${cell.isCurrentMonth ? '' : 'muted'} ${cell.date === selectedDate ? 'selected' : ''} ${cell.date === formatDate(today) ? 'today' : ''}`} onClick={() => setSelectedDate(cell.date)}><span className="day-number">{cell.day}</span>{cell.hasRecord && <span className="record-dot" />}</button>)}</div></section>
-      <section className="record-editor card"><div className="editor-header"><div><h2 className="editor-title">{selectedRecord ? '编辑打卡' : '今日打卡'}</h2><span className="editor-date">{selectedDate}</span></div>{selectedRecord && <button className="delete-button" onClick={deleteRecord}>删除</button>}</div><textarea className="content-input" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="记录今天学了什么，例如：完成 for 循环练习，理解了 range 的用法。" /><div className="form-row"><span className="form-label">学习时长</span><div className="duration-control"><input className="duration-input" value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} placeholder="0" /><span className="duration-unit">分钟</span></div></div><div className="form-row mood-row"><span className="form-label">状态</span><div className="mood-list">{['轻松', '一般', '有点难'].map((mood) => <button key={mood} className={form.mood === mood ? 'mood-chip active' : 'mood-chip'} onClick={() => setForm({ ...form, mood })}>{mood}</button>)}</div></div><button className="primary-button save-button-wide" onClick={saveRecord}>{selectedRecord ? '保存修改' : '完成打卡'}</button></section>
+      <section className="record-editor card"><div className="editor-header"><div><h2 className="editor-title">{selectedRecord ? '编辑打卡' : '今日打卡'}</h2><span className="editor-date">{selectedDate}</span></div>{selectedRecord && <button className="delete-button" disabled={loading || saving || deleting} onClick={deleteRecord}>{deleting ? '删除中...' : '删除'}</button>}</div><textarea className="content-input" disabled={loading || saving || deleting} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="记录今天学了什么，例如：完成 for 循环练习，理解了 range 的用法。" /><div className="form-row"><span className="form-label">学习时长</span><div className="duration-control"><input className="duration-input" disabled={loading || saving || deleting} value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} placeholder="0" /><span className="duration-unit">分钟</span></div></div><div className="form-row mood-row"><span className="form-label">状态</span><div className="mood-list">{['轻松', '一般', '有点难'].map((mood) => <button key={mood} disabled={loading || saving || deleting} className={form.mood === mood ? 'mood-chip active' : 'mood-chip'} onClick={() => setForm({ ...form, mood })}>{mood}</button>)}</div></div><button className="primary-button save-button-wide" disabled={loading || saving || deleting} onClick={saveRecord}>{saving ? '保存中...' : selectedRecord ? '保存修改' : '完成打卡'}</button></section>
     </main>
   )
 }
@@ -408,8 +512,17 @@ function SettingsPage({ navigate }) {
   const [baseUrlInput, setBaseUrlInput] = useState(getBaseUrl())
   const [developerTapCount, setDeveloperTapCount] = useState(0)
   const [showDeveloperSettings, setShowDeveloperSettings] = useState(false)
-  const progress = getProgressSummary(getHighestCompleted())
+  const [progress, setProgress] = useState(getProgressSummary(getHighestCompleted()))
   const saveSetting = (key, value) => { setStored(key, value); setSettings(loadSettings()) }
+
+  useEffect(() => {
+    api.get('/levels')
+      .then((result) => {
+        const completed = Number(result.data?.summary?.completed || 0)
+        setProgress(result.data?.summary || getProgressSummary(completed))
+      })
+      .catch(() => setProgress(getProgressSummary(getHighestCompleted())))
+  }, [])
 
   return (
     <main className={`page settings-page ${settings.eyeProtectionEnabled ? 'eye' : ''}`}>
@@ -419,7 +532,7 @@ function SettingsPage({ navigate }) {
       <SettingsSection title="学习体验"><OptionRow label="代码字号" help="写代码时看得更舒服" options={[['small', '小'], ['medium', '中'], ['large', '大']]} value={settings.codeSize} onChange={(v) => saveSetting('codeSize', v)} /><OptionRow label="提示方式" help="遇到难题时给多少提醒" wide options={[['low', '少提示'], ['normal', '普通'], ['high', '多一点']]} value={settings.hintLevel} onChange={(v) => saveSetting('hintLevel', v)} /><SwitchRow label="自动保存代码" help="离开页面也不怕丢失练习" checked={settings.autoSaveCodeEnabled} onChange={(v) => saveSetting('autoSaveCodeEnabled', v)} /><SwitchRow label="鼓励动画" help="通关后给一点小奖励反馈" checked={settings.encourageAnimationEnabled} onChange={(v) => saveSetting('encourageAnimationEnabled', v)} /><SwitchRow label="提示音效" help="按钮和通关声音开关" checked={settings.soundEnabled} onChange={(v) => saveSetting('soundEnabled', v)} last /></SettingsSection>
       <SettingsSection title="护眼与专注"><SwitchRow label="护眼模式" help="把背景换成更柔和的颜色" checked={settings.eyeProtectionEnabled} onChange={(v) => saveSetting('eyeProtectionEnabled', v)} /><SwitchRow label="休息提醒" help="学习一会儿，记得放松眼睛" checked={settings.restReminderEnabled} onChange={(v) => saveSetting('restReminderEnabled', v)} last /></SettingsSection>
       <SettingsSection title="AI 小助手"><OptionRow label="回答风格" help="选择小助手解释得多还是少" wide options={[['simple', '简单点'], ['detailed', '详细点']]} value={settings.aiReplyStyle} onChange={(v) => saveSetting('aiReplyStyle', v)} /><SwitchRow label="先给提示" help="尽量不直接说答案" checked={settings.aiHintFirst} onChange={(v) => saveSetting('aiHintFirst', v)} /><ActionRow label="清空临时对话" help="不影响账号里的历史记录" onClick={() => { ['chat_cache', 'chat_draft', 'current_session_id'].forEach(removeStored); toast('已清空') }} last /></SettingsSection>
-      <SettingsSection title="账号与数据"><ActionRow danger label="重置学习数据" help="清空本机关卡进度和打卡记录" onClick={() => { if (window.confirm('会清空本机关卡进度和打卡记录，需要重新开始挑战。')) { ['level_progress', 'learning_records'].forEach(removeStored); toast('已重置') } }} /><div className="setting-row last"><SettingCopy label="退出登录" help="离开当前账号" /><button className="logout-button" onClick={() => { removeStored('access_token'); removeStored('refresh_token'); navigate('auth') }}>退出</button></div></SettingsSection>
+      <SettingsSection title="账号与数据"><ActionRow danger label="重置本机关卡缓存" help="不会删除账号中的打卡记录" onClick={() => { if (window.confirm('只会清空本机关卡进度缓存，不会删除账号中的打卡记录。')) { removeStored('level_progress'); setProgress(getProgressSummary(0)); toast('本机关卡缓存已重置') } }} /><div className="setting-row last"><SettingCopy label="退出登录" help="离开当前账号" /><button className="logout-button" onClick={() => { removeStored('access_token'); removeStored('refresh_token'); navigate('auth') }}>退出</button></div></SettingsSection>
       {showDeveloperSettings && <SettingsSection title="开发者设置"><div className="setting-row edit-row last"><SettingCopy label="后端接口" help="调试服务地址，平时不用改" /><div className="url-control"><input className="url-input" value={baseUrlInput} onChange={(e) => setBaseUrlInput(e.target.value)} placeholder="http://localhost:8000/api/v1" /><button className="save-button" onClick={() => { if (!/^https?:\/\/.+/.test(baseUrlInput)) return toast('请输入 http 或 https 地址'); setStored('baseUrl', baseUrlInput.replace(/\/$/, '')); toast('接口地址已保存') }}>保存</button></div></div></SettingsSection>}
       <button className="version" onClick={() => { const count = developerTapCount + 1; setDeveloperTapCount(count); if (count >= 5) setShowDeveloperSettings(true) }}>Python 学习小程序 v1.0</button>
     </main>
