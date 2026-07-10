@@ -26,16 +26,17 @@
 
 ```text
 .
-├── app/                  # FastAPI 后端业务模块
-│   ├── api/              # 认证、AI、代码运行、学习管理接口
-│   ├── core/             # 数据库和认证核心配置
-│   ├── models/           # SQLAlchemy 数据模型
-│   └── services/         # 学习服务与代码沙箱
+├── backend/              # FastAPI 后端
+│   ├── app/              # 后端业务模块
+│   │   ├── api/          # 认证、AI、代码运行、学习管理接口
+│   │   ├── core/         # 数据库和认证核心配置
+│   │   ├── models/       # SQLAlchemy 数据模型
+│   │   └── services/     # 学习服务与代码沙箱
+│   ├── main.py           # 后端启动入口
+│   └── requirements.txt  # 后端依赖
 ├── frontend/             # React + Vite 前端
 │   ├── src/              # 前端页面、API 封装、关卡数据和样式
 │   └── images/           # 页面图片与 tabbar 图标资源
-├── main.py               # 后端启动入口
-└── requirements.txt      # 后端依赖
 ```
 
 ## 后端运行
@@ -44,6 +45,7 @@
 2. 安装依赖：
 
 ```bash
+cd backend
 pip install -r requirements.txt
 ```
 
@@ -123,6 +125,7 @@ http://localhost:8000/api/v1
 后端语法检查：
 
 ```bash
+cd backend
 python -m compileall -q .
 ```
 
